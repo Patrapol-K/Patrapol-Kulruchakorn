@@ -25,7 +25,7 @@ client.remove_command("help")
 @client.group(invoke_without_command=True)
 async def help(ctx):
     em = discord.Embed(title = "Help", description = "Use 'help' <command> for extended info")
-    em.add_field(name = "General", value= "balance, changeprefix")
+    em.add_field(name = "General", value= "balance, changeprefix, serverlevel")
     em.add_field(name="Games", value= "cflip, odds, blackjack")
 
     await ctx.send(embed = em)
@@ -52,8 +52,13 @@ async def odds(ctx):
     await ctx.send(embed = em)
 @help.command()
 async def blackjack(ctx):
-    em = discord.Embed(title='BlackJack', description='Plays a game of BlackJack.Please make sure you have a text channel called "blackjack" and are in it.')
+    em = discord.Embed(title='BlackJack', description='Plays a game of BlackJack.Please make sure you have a text channel called "blackjack" and are in it.\n!blackjackhelp for further info.')
     em.add_field(name="*Syntax*", value = '!play <amount>')
+    await ctx.send(embed = em)
+@help.command()
+async def serverlevel(ctx):
+    em = discord.Embed(title='Server Level', description='Shows the current server level and experience points it currently has.')
+    em.add_field(name="*Syntax*", value = '<prefix>serverlevel, <prefix>slvl')
     await ctx.send(embed = em)
 dataFilename = "data.pickle"
 
@@ -62,6 +67,11 @@ class Data():
         self.wallet = wallet
         self.bank = bank
 data = {}
+meschecker = False
+previd = ""
+prevauthor = ""
+prevcontent = 0
+
 
 # Assumes there is a file in DATA_PATH called 'database.txt'
 with open(DATA_PATH, 'r') as file:
@@ -103,6 +113,10 @@ async def on_guild_remove(guild):
 
 @client.event
 async def on_message(message):
+    global meschecker
+    global previd
+    global prevauthor
+    global prevcontent
     with open("prefixes.json", 'r') as f:
         prefixes = json.load(f)
     with open('serverlvl.json', 'r') as q:
@@ -114,13 +128,36 @@ async def on_message(message):
         await update_data(server,str(message.guild.id))
         await client.process_commands(message)
     else:
-        member = loadMemData(message.author.id)
-        member.wallet += (len(message.content)*server[str(message.guild.id)]['lvl'])
-        data[str(message.author)]['balance'] += (len(message.content)*server[str(message.guild.id)]['lvl'])
-        saveMemData(message.author.id,member)
+        if meschecker == True and previd != message.author.id:
+            member = loadMemData(message.author.id)
+            member2 = loadMemData(previd)
+            member.wallet += round(min((len(message.content)*(1+(server[str(message.guild.id)]['lvl']/10))),500))
+            member2.wallet += round(min((prevcontent*(1+(server[str(message.guild.id)]['lvl']/10))),500))
+            data[str(message.author)]['balance'] += round(min((len(message.content)*(1+(server[str(message.guild.id)]['lvl']/10))),500))
+            data[str(prevauthor)]['balance'] += round(min((prevcontent*(1+(server[str(message.guild.id)]['lvl']/10))),500))
+            saveMemData(message.author.id,member)
+            saveMemData(previd, member2)
+            json.dump(data, open(DATA_PATH, 'w'))
+            total_exp = len(message.content) + prevcontent
+            await add_exp(server, str(message.guild.id),total_exp)
+            await level_up(server, str(message.guild.id), message.channel)
+            previd = ""
+            prevauthor = ""
+            prevcontent = 0
+            meschecker = False
+        else:
+            previd = message.author.id
+            prevauthor = message.author
+            prevcontent = len(message.content)
+            meschecker = True
+
+    member = loadMemData(message.author.id)
+    if member.wallet != data[str(message.author)]['balance']:
+        amount = min(member.wallet, data[str(message.author)]['balance'])
+        member.wallet = amount
+        data[str(message.author)]['balance'] = amount
+        saveMemData(message.author.id, member )
         json.dump(data, open(DATA_PATH, 'w'))
-        await add_exp(server, str(message.guild.id),len(message.content))
-        await level_up(server, str(message.guild.id), message.channel)
     
     with open('serverlvl.json', 'w') as q:
         json.dump(server, q)
@@ -143,7 +180,7 @@ async def on_message(message):
     msg = message.content if message.content.startswith('!gift') or message.content.startswith('!give') else message.content.lower()
     
     #------------------------------------------------------------------#
-    if msg == '!help':
+    if msg == '!blackjackhelp':
         embed = discord.Embed(title='List of Commands', desc='-', color=discord.Color.gold())
         embed.add_field(name='!play | !bet', value='!play <token amount>', inline=False)
         embed.add_field(name='!hit | !stand', value='!hit - be dealt another card\n!stand - lock in your hand', inline=False)
@@ -152,7 +189,6 @@ async def on_message(message):
         embed.add_field(name='!bal | !stats | !balance', value='Shows player profile with current balance, W/L/T, and rank', inline=False)
         
         embed.add_field(name='!top | !leaderboard', value='Displays the top 4 players', inline=False)
-        embed.add_field(name='!job | !collect', value='Adds 200 tokens to your account. Can only be claimed once per hour', inline=False)
         await channel.send(f"{player.mention}", embed=embed)
         return
     #------------------------------------------------------------------#
@@ -272,19 +308,6 @@ async def on_message(message):
         else:
             await channel.send(f"{player.mention}", embed=genEmbed("error", 'Error!', 'Currently in a game!', color=discord.Color.orange()))
     
-    #------------------------------------------------------------------#
-    elif msg.startswith('!job') or msg.startswith('!collect'):
-        lastjob = datetime.strptime(data[name]['lastjob'], "%Y-%m-%d %H:%M:%S")
-        if lastjob <= datetime.utcnow()-timedelta(hours=1):
-            # modify user
-            data[name]['lastjob'] = f'{datetime.utcnow()}'.split('.')[0]
-            data[name]['balance'] += 200
-            json.dump(data, open(DATA_PATH, 'w'))
-            await channel.send(f"{player.mention}", embed=genEmbed("job", 'Paycheck Time!', 'You received 200 tokens', color=discord.Color.green(), player=name))
-        else:
-            # error
-            time_to_next_job = str((lastjob+timedelta(hours=1))-datetime.strptime(f'{datetime.utcnow()}'.split('.')[0], "%Y-%m-%d %H:%M:%S")).split(':')
-            await channel.send(f"{player.mention}", embed=genEmbed("error", 'Error!', f'Can only !job once every hour!\nNext paycheck in:\n{time_to_next_job[-2]} min {time_to_next_job[-1]} sec', color=discord.Color.orange()))
     
     #------------------------------------------------------------------#
     elif msg == '!leaderboard' or msg == '!top':
@@ -294,26 +317,6 @@ async def on_message(message):
         await channel.send(f"{player.mention}", embed=genEmbed("leaderboard", ":chart_with_upwards_trend: :medal: Leaderboard :medal: :chart_with_upwards_trend:", f'{line}', color=discord.Color.purple()))
     
     #------------------------------------------------------------------#
-    elif msg.startswith('!give') or msg.startswith('!gift'):
-        """ 
-        Gift/Give command. Usage: !give <player> <token amount> or !gift <player> <token amount>
-            Constraints:
-                Cannot gift more than current balance
-                Cannot gift if currently in a game
-                Must gift to someone currently in the database
-        """
-        if name in sessions.keys():
-            await channel.send(f"{player.mention}", embed=genEmbed('error', 'Error!', "Can't gift while you are in a game!", color=discord.Color.orange()))
-            return
-        split_msg = msg.split(' ')
-        amount = int(split_msg[2]) if len(split_msg) == 3 and split_msg[2].isdigit() else 0
-        if len(split_msg) == 3 and split_msg[1] in data.keys() and (amount > 0 and data[name]['balance']-amount >= 0):
-            data[name]['balance'] -= amount
-            data[split_msg[1]]['balance'] += amount
-            embed = discord.Embed(title=':confetti_ball::gift: Gift! :gift::confetti_ball:', description=f"{name[:-5]} gave {split_msg[1][:-5]} {amount} tokens!", color=discord.Color.dark_grey())
-            await channel.send(f"{player.mention} gifts {split_msg[1][:-5]}", embed=embed)
-        else:
-            await channel.send(f"{player.mention}", embed=genEmbed('error', 'Error!', 'Correct command is !gift <user#tag> <valid amount>', color=discord.Color.orange()))
 
     elif msg == '!create':
         editcurren = loadMemData(message.author.id)
@@ -374,18 +377,21 @@ async def bal(message):
 
     await message.channel.send(embed=embedVar)
 
+@client.command(aliases = ['slevel', 'slvl', 'serlvl'])
+async def serverlevel(message):
+    with open("serverlvl.json",'r') as f:
+        server = json.load(f)
+    level = server[str(message.guild.id)]['lvl']
+    curexp = server[str(message.guild.id)]['exp']
+    lvlcap = (int(level)+1) ** 8
+    await message.channel.send(f'The server is level {level}\n  {curexp}/{lvlcap}')
+
 @client.command()
-async def give(message,amount):
-    member = loadMemData(message.author.id)
-    member.wallet += int(amount)
-    await message.channel.send(f'gave {message.author.display_name} {amount}')
-    saveMemData(message.author.id, member)
-@client.command()
-async def remove(message,amount):
-    member = loadMemData(message.author.id)
-    member.wallet -= int(amount)
-    await message.channel.send(f'remove {message.author.display_name} {amount}')
-    saveMemData(message.author.id, member)
+async def clear(ctx, amount= 10):
+    await ctx.channel.purge(limit=amount)
+
+
+
 
 @client.command()
 async def cflip(message, side, amount):
