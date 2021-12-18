@@ -25,7 +25,7 @@ client.remove_command("help")
 @client.group(invoke_without_command=True)
 async def help(ctx):
     em = discord.Embed(title = "Help", description = "Use 'help' <command> for extended info")
-    em.add_field(name = "General", value= "balance, changeprefix, serverlevel")
+    em.add_field(name = "General", value= "balance, changeprefix, serverlevel, clear")
     em.add_field(name="Games", value= "cflip, odds, blackjack")
 
     await ctx.send(embed = em)
@@ -59,6 +59,11 @@ async def blackjack(ctx):
 async def serverlevel(ctx):
     em = discord.Embed(title='Server Level', description='Shows the current server level and experience points it currently has.')
     em.add_field(name="*Syntax*", value = '<prefix>serverlevel, <prefix>slvl')
+    await ctx.send(embed = em)
+@help.command()
+async def clear(ctx):
+    em = discord.Embed(title='Clear', description='Clear the text in the designated channel.')
+    em.add_field(name="*Syntax*", value = '<prefix>clear')
     await ctx.send(embed = em)
 dataFilename = "data.pickle"
 
@@ -150,14 +155,6 @@ async def on_message(message):
             prevauthor = message.author
             prevcontent = len(message.content)
             meschecker = True
-
-    member = loadMemData(message.author.id)
-    if member.wallet != data[str(message.author)]['balance']:
-        amount = min(member.wallet, data[str(message.author)]['balance'])
-        member.wallet = amount
-        data[str(message.author)]['balance'] = amount
-        saveMemData(message.author.id, member )
-        json.dump(data, open(DATA_PATH, 'w'))
     
     with open('serverlvl.json', 'w') as q:
         json.dump(server, q)
@@ -431,6 +428,23 @@ async def odds(message,num,amount):
             await message.channel.send(f'You rolled {number}, and earned {earn} coins.')
     saveMemData(message.author.id, player)
     json.dump(data, open(DATA_PATH, 'w'))
+
+@client.command(alias = ['give','gift'])
+async def send(message,amount):
+    global previd
+    global prevauthor
+
+    sender = loadMemData(message.author.id)
+    reciever = loadMemData(previd)
+    reciever.wallet += int(amount)
+    sender.wallet -= int(amount)
+    data[str(message.author)]['balance'] -= int(amount)
+    data[str(prevauthor)]['balance'] += int(amount)
+    await message.channel.send(f'{amount} has been sent to {prevauthor}.')
+    saveMemData(message.author.id, sender)
+    saveMemData(previd, reciever)
+    json.dump(data, open(DATA_PATH, 'w'))
+
 
 
 #Functions
